@@ -188,7 +188,7 @@ otelite metrics --since 30m
 ### Show schema
 
 ```bash
-otelite schema          # traces (default)
+otelite schema traces
 otelite schema logs
 otelite schema metrics
 ```
