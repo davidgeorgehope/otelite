@@ -29,6 +29,7 @@ func main() {
 	rootCmd.AddCommand(tracesCmd())
 	rootCmd.AddCommand(logsCmd())
 	rootCmd.AddCommand(metricsCmd())
+	rootCmd.AddCommand(savedQueryCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

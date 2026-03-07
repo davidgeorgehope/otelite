@@ -223,10 +223,33 @@ An LLM with access to `ducktel query` should be able to:
 3. Correlate upstream/downstream impact (e.g. payment failure → checkout failure)
 4. Detect latency degradation (cache leak, queue overload)
 
+## Saved Queries (Implemented)
+
+Saved queries are the LLM's periodic checklist. ducktel stores them but never runs them automatically — there is no scheduler, no webhooks, no notification system. The LLM agent runs them on its own heartbeat loop and reasons about the results.
+
+### CLI Commands
+- `ducktel saved create <name> <sql> [--description] [--schedule] [--tags]`
+- `ducktel saved list`
+- `ducktel saved show <name>`
+- `ducktel saved run <name>` — execute one, get JSON result
+- `ducktel saved run-all` — execute all, get JSON array of results (the heartbeat primitive)
+- `ducktel saved delete <name>`
+
+### Storage
+- JSON file at `<data-dir>/saved_queries.json`
+- No database needed — fits the "just files" philosophy
+
+### The Loop
+1. Agent investigates an incident using `ducktel query`
+2. Agent finds the diagnostic SQL that reveals the problem
+3. Agent saves it: `ducktel saved create "payment-errors" "SELECT ..."`
+4. On future heartbeats: `ducktel saved run-all` → agent checks results → acts if needed
+
+The query that diagnosed the problem becomes the query that prevents the next one.
+
 ## Future / Nice-to-Have
 
 - gRPC receiver
-- Logs and metrics signals
 - Web UI with basic trace viewer
 - Auto-generated DuckDB views with common joins
 - Tail-based sampling before writing

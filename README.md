@@ -1,8 +1,12 @@
 # ducktel
 
-A lightweight local OpenTelemetry backend. Receives OTLP traces, logs, and metrics over HTTP, stores them as partitioned Parquet files, and makes them queryable via embedded DuckDB through a CLI.
+**The user of this tool is not a human. It's an LLM.**
 
-Single binary. No external dependencies. Designed for LLM agents to shell out to for telemetry diagnostics.
+ducktel is a lightweight local OpenTelemetry backend. It receives OTLP traces, logs, and metrics over HTTP, stores them as partitioned Parquet files, and makes them queryable via embedded DuckDB through a CLI.
+
+Single binary. No external dependencies. No dashboards. No alerting infrastructure. No webhooks. No notification channels.
+
+An LLM agent shells out to `ducktel query`, gets structured JSON back, and reasons about the results. The agent *is* the dashboard. The agent *is* the alerting engine. The agent *is* the intelligence layer. Everything ducktel does is designed for that consumer — not for a human staring at a screen.
 
 ## Why This Exists
 
@@ -202,6 +206,45 @@ ducktel traces --since 30m --format table
 ducktel logs --severity error --format csv
 ```
 
+### Saved queries
+
+Saved queries are the LLM's checklist — queries worth running periodically. ducktel stores them but never executes them automatically. There is no scheduler, no webhook, no notification system. The LLM agent decides when to run them (on its own heartbeat loop, cron, or whenever it wants) and what to do with the results.
+
+```bash
+# Save a query the agent discovered during an investigation
+ducktel saved create "error-rate-by-service" \
+  "SELECT service_name, count(*) FILTER (WHERE status_code = 'STATUS_CODE_ERROR') * 100.0 / count(*) as error_pct FROM traces WHERE start_time >= epoch_us(now() - INTERVAL '5 minutes') GROUP BY service_name HAVING error_pct > 0" \
+  --description "Error rate by service over last 5 minutes" \
+  --schedule "every 60s" \
+  --tags errors,slo
+
+# Save a latency check
+ducktel saved create "p99-latency" \
+  "SELECT service_name, span_name, quantile_cont(duration_ms, 0.99) as p99_ms FROM traces WHERE start_time >= epoch_us(now() - INTERVAL '10 minutes') GROUP BY service_name, span_name ORDER BY p99_ms DESC LIMIT 10" \
+  --description "Top 10 slowest endpoints by P99 latency" \
+  --schedule "every 5m" \
+  --tags latency
+
+# List all saved queries
+ducktel saved list
+ducktel saved list --format json
+
+# Show a specific query's details
+ducktel saved show "error-rate-by-service"
+
+# Run a single saved query
+ducktel saved run "error-rate-by-service"
+
+# Run ALL saved queries at once — the agent's heartbeat check
+# One command, all diagnostics, structured JSON output
+ducktel saved run-all
+
+# Delete a query that's no longer relevant
+ducktel saved delete "error-rate-by-service"
+```
+
+The `run-all` command is the key primitive. An LLM agent on a heartbeat loop runs `ducktel saved run-all`, gets back a JSON array of all results, and reasons about what needs attention. The investigative query that found a bug today becomes the monitoring query that catches it tomorrow — no translation layer, no alert rule syntax, just SQL.
+
 ## Agent Integration
 
 ducktel is built for LLM agents. Here's how an agent might investigate an incident:
@@ -262,6 +305,24 @@ ducktel query "
 Every step returns structured JSON. The agent reasons about each result and decides what to query next. No dashboards opened. No humans clicking through UIs. No context-switching between tabs. Just an AI systematically narrowing from "something's wrong" to "here's the root cause and here's the evidence."
 
 This is what observability looks like when the consumer of telemetry is an LLM, not a human staring at a screen.
+
+### The diagnostic-to-monitoring loop
+
+The real power of saved queries: the investigative query that diagnosed an incident becomes the monitoring query that prevents the next one. No context switch, no "now go create an alert rule in a different system."
+
+```bash
+# Agent just diagnosed a payment service issue. Save the query that found it:
+ducktel saved create "payment-error-spike" \
+  "SELECT count(*) as errors FROM traces WHERE service_name = 'payment-service' AND status_code = 'STATUS_CODE_ERROR' AND start_time >= epoch_us(now() - INTERVAL '5 minutes')" \
+  --description "Errors in payment service over 5min window" \
+  --schedule "every 60s" \
+  --tags payment,errors
+
+# Later, on the agent's heartbeat loop:
+ducktel saved run-all
+# → Agent sees payment-error-spike returned 0 rows. All clear.
+# → Next heartbeat, it returns 47 rows. Agent investigates.
+```
 
 ## Schemas
 
